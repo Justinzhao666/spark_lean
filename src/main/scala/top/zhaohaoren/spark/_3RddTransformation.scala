@@ -1,7 +1,7 @@
 package top.zhaohaoren
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{Partitioner, SparkConf, SparkContext}
 
 object _3RddTransformation {
 
@@ -74,7 +74,7 @@ object _3RddTransformation {
 
 
     // sort by 排序
-    val sortRdd: RDD[Int] = listRdd5.sortBy(x => x,/*排序规则*/false/*排序方向*/)
+    val sortRdd: RDD[Int] = listRdd5.sortBy(x => x, /*排序规则*/ false /*排序方向*/)
 
     // union 并集 subtract 差集 intersection 交集  cartesian 笛卡尔积 zip 2个数据集两两配对。  配对数量不够的话，和scala不一样spark算子会直接报错，2个数据集数量应该是一样的分区数也要相等。
     val rdd1: RDD[Int] = sc.makeRDD(1 to 10)
@@ -82,5 +82,37 @@ object _3RddTransformation {
     val rddUnion: RDD[Int] = rdd1.union(rdd2)
 
 
+    /*KV 一个Pair类型的RDD  转换*/
+    // 他们都有一个特质： 无论后面算子是怎么算的，都是对key进行分组后的。
+
+    // 分区 partitionBy
+    val pairRdd: RDD[(String, Int)] = sc.makeRDD(List(("a", 1), ("b", 2), ("c", 3), ("a", 2), ("c", 2)))
+    pairRdd.partitionBy(new MyPartitioner(3)) // 使用自定义分区来进行分区，传入一个分区器。
+    pairRdd.glom().foreach(println)
+
+    // 分组 groupByKey 按照key进行分组
+    val groupPairRdd: RDD[(String, Iterable[Int])] = pairRdd.groupByKey()
+
+    // reduce by key 按照key进行分组进行reduce
+    val reducePairRdd: RDD[(String, Int)] = pairRdd.reduceByKey(_ + _)
+
+    // aggregateByKey  分区内一个操作，分区和分区间 又是指定另外一个操作。
+    val pairPartitionRdd: RDD[(String, Int)] = sc.parallelize(List(("a", 1), ("b", 2), ("c", 3), ("a", 2), ("c", 2)), 2)
+    val aggRdd: RDD[(String, Int)] = pairPartitionRdd.aggregateByKey(0 /*需要一个初始值（对key的初始值），因为reduce的操作的算子函数是两两进行的，第一个值需要和一个初始值来进行计算*/)(
+      math.max(_, _) /* 第一个函数：区间内是怎么运算的*/ ,
+      _ + _ /*第二个函数：区间间是怎么运算的*/)
+
+
+  }
+}
+
+class MyPartitioner(partitions: Int) extends Partitioner {
+  override def numPartitions: Int = {
+    // 分了几个区域
+    partitions
+  }
+
+  override def getPartition(key: Any): Int = {
+    1 // 这个key表示我要根据kv中k的那个数据 来决定分到哪个区。
   }
 }
